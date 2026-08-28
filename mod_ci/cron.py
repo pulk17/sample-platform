@@ -14,7 +14,8 @@ def cron(testing=False):
     from github import Auth, Github
 
     from database import create_session
-    from mod_ci.controllers import TestPlatform, gcp_instance, start_platforms
+    from mod_ci.controllers import (TestPlatform, gcp_instance,
+                                    prune_test_artifacts, start_platforms)
     from run import config, log
 
     log.info('Run the cron for kicking off CI platform(s).')
@@ -31,6 +32,8 @@ def cron(testing=False):
         gcp_instance(current_app._get_current_object(), db, TestPlatform.linux, repository, None)
     else:
         start_platforms(repository)
+        prune_test_artifacts(log, config['SAMPLE_REPOSITORY'],
+                             config.get('ARTIFACT_RETENTION_DAYS', 90))
 
 
 cron()

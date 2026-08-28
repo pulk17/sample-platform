@@ -40,3 +40,6 @@ LINUX_INSTANCE_FAMILY_NAME = "ubuntu-minimal-2404-lts-amd64"
 GCP_INSTANCE_MAX_RUNTIME = 120  # In minutes
 GCS_BUCKET_NAME = 'spdev'
 GCS_SIGNED_URL_EXPIRY_LIMIT = 720  # In minutes
+# Age past which a run's CI artifacts (binary, coredump, combined
+# stdout) are deleted by the cron. 0 keeps them forever.
+ARTIFACT_RETENTION_DAYS = 90

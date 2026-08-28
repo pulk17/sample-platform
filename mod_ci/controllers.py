@@ -2771,6 +2771,73 @@ def upload_artifact_type_request(log, test_id, repo_folder, test, request) -> bo
     return True
 
 
+ARTIFACT_PREFIX = 'test_artifacts/'
+ARTIFACT_SWEEP_STAMP = '.artifact-sweep'
+
+
+def prune_test_artifacts(log, repo_folder, days) -> int:
+    """
+    Delete run artifacts past the retention window.
+
+    Every run stores its own copy of the binary alongside its combined stdout
+    log, and nothing has ever removed either. A run stops being worth
+    debugging long before its artifacts stop costing storage, so age them out.
+
+    The cron runs every ten minutes but this only sweeps once a day, tracked
+    by the mtime of a stamp file rather than a table, since losing the stamp
+    costs one extra sweep and nothing else.
+
+    :param log: logger
+    :type log: Logger
+    :param repo_folder: SAMPLE_REPOSITORY path
+    :type repo_folder: str
+    :param days: age in days past which an artifact is removed; 0 disables
+    :type days: int
+    :return: number of blobs deleted
+    :rtype: int
+    """
+    from run import storage_client_bucket
+
+    if days <= 0:
+        return 0
+
+    stamp = os.path.join(repo_folder, ARTIFACT_SWEEP_STAMP)
+    now = time.time()
+    if os.path.isfile(stamp) and now - os.path.getmtime(stamp) < 86400:
+        return 0
+    Path(stamp).touch()
+
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    deleted = 0
+
+    if storage_client_bucket is not None:
+        for blob in storage_client_bucket.list_blobs(prefix=ARTIFACT_PREFIX):
+            if blob.time_created is None or blob.time_created >= cutoff:
+                continue
+            try:
+                blob.delete()
+                deleted += 1
+            except Exception as e:
+                # Realistically a missing storage.objects.delete on the
+                # service account, which would fail identically for every
+                # remaining blob. One warning beats thousands.
+                log.warning(f'Artifact retention: stopping after {blob.name} could not be deleted: {e}')
+                break
+
+    # The upload handler also writes each artifact to local disk, so clear
+    # whatever is still sitting there.
+    local_root = os.path.join(repo_folder, 'test_artifacts')
+    if os.path.isdir(local_root):
+        stale = cutoff.timestamp()
+        for name in os.listdir(local_root):
+            entry = os.path.join(local_root, name)
+            if os.path.isdir(entry) and os.path.getmtime(entry) < stale:
+                shutil.rmtree(entry, ignore_errors=True)
+
+    log.info(f'Artifact retention: deleted {deleted} blob(s) older than {days} days')
+    return deleted
+
+
 def finish_type_request(log, test_id, test, request):
     """
     Handle finish request type for progress reporter.
