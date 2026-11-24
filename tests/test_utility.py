@@ -48,3 +48,55 @@ class TestUtility(BaseTestCase):
         mock_is_github_ip.assert_called_once()
         self.assertEqual(mock_abort.call_count, 7)
         self.assertEqual(response, "Test Success")
+
+    def test_is_valid_signature_accepts_sha256(self):
+        """Test that a matching X-Hub-Signature-256 value is accepted."""
+        import hashlib
+        import hmac
+
+        from utility import is_valid_signature
+
+        data = b'{"zen": "Keep it logically awesome."}'
+        digest = hmac.new(b'secret', msg=data, digestmod=hashlib.sha256).hexdigest()
+        self.assertTrue(is_valid_signature(f'sha256={digest}', data, 'secret'))
+        self.assertFalse(is_valid_signature(f'sha256={digest}', data, 'other-secret'))
+
+    def test_is_valid_signature_rejects_malformed_headers(self):
+        """Test that malformed or unexpected signature headers are rejected instead of raising."""
+        import hmac
+
+        from utility import is_valid_signature
+
+        data = b'{}'
+        md5_digest = hmac.new(b'secret', msg=data, digestmod='md5').hexdigest()
+        sha1_digest = hmac.new(b'secret', msg=data, digestmod='sha1').hexdigest()
+        for header in (None, '', 'sha256', 'new=abc', 'unknown=abc', 'sha256=\u00e9',
+                       f'md5={md5_digest}', f'sha1={sha1_digest}'):
+            self.assertFalse(is_valid_signature(header, data, 'secret'), header)
+
+    def test_is_valid_signature_robustness(self):
+        """Test is_valid_signature against non-string headers, str payloads, bytes keys, and None inputs."""
+        import hashlib
+        import hmac
+
+        from utility import is_valid_signature
+
+        key = "secret_key_123"
+        payload = b'{"ref": "refs/heads/master"}'
+        mac = hmac.new(b"secret_key_123", payload, hashlib.sha256)
+        valid_header = f"sha256={mac.hexdigest()}"
+
+        # Valid signature with str payload and bytes key
+        self.assertTrue(
+            is_valid_signature(valid_header, payload.decode(), key))
+        self.assertTrue(
+            is_valid_signature(valid_header, payload, b"secret_key_123"))
+
+        # Non-string header
+        self.assertFalse(is_valid_signature(12345, payload, key))
+
+        # None or invalid data or key
+        self.assertFalse(is_valid_signature(valid_header, None, key))
+        self.assertFalse(is_valid_signature(valid_header, payload, None))
+        self.assertFalse(is_valid_signature(valid_header, payload, 12345))
+        self.assertFalse(is_valid_signature(valid_header, 12345, key))
